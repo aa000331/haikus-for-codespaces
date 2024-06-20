@@ -1,0 +1,123 @@
+//@version=5
+indicator("Trendlines with Breaks [LuxAlgo]", "LuxAlgo - Trendlines with Breaks", overlay = true, max_labels_count=300)
+
+//------------------------------------------------------------------------------
+//Settings
+//-----------------------------------------------------------------------------{
+length = input.int(14, 'Swing Detection Lookback')
+mult = input.float(1., 'Slope', minval = 0, step = .1)
+calcMethod = input.string('Atr', 'Slope Calculation Method', options = ['Atr','Stdev','Linreg'])
+backpaint = input(true, tooltip = 'Backpainting offset displayed elements in the past. Disable backpainting to see real time information returned by the indicator.')
+
+// Style
+upCss = input.color(color.teal, 'Up Trendline Color', group = 'Style')
+dnCss = input.color(color.red, 'Down Trendline Color', group = 'Style')
+showExt = input(true, 'Show Extended Lines')
+
+//-----------------------------------------------------------------------------}
+//Calculations
+//-----------------------------------------------------------------------------{
+var upper = 0.
+var lower = 0.
+var slope_ph = 0.
+var slope_pl = 0.
+
+var offset = backpaint ? length : 0
+
+n = bar_index
+src = close
+
+ph = ta.pivothigh(length, length)
+pl = ta.pivotlow(length, length)
+
+// Slope Calculation Method
+slope = switch calcMethod
+    'Atr'    => ta.atr(length) / length * mult
+    'Stdev'  => ta.stdev(src,length) / length * mult
+    'Linreg' => math.abs(ta.sma(src * n, length) - ta.sma(src, length) * ta.sma(n, length)) / ta.variance(n, length) / 2 * mult
+
+// Get slopes and calculate trendlines
+slope_ph := ph ? slope : slope_ph
+slope_pl := pl ? slope : slope_pl
+
+upper := ph ? ph : upper - slope_ph
+lower := pl ? pl : lower + slope_pl
+
+var upos = 0
+var dnos = 0
+upos := ph ? 0 : close > upper - slope_ph * length ? 1 : upos
+dnos := pl ? 0 : close < lower + slope_pl * length ? 1 : dnos
+
+//-----------------------------------------------------------------------------}
+//Extended Lines
+//-----------------------------------------------------------------------------{
+var uptl  = line.new(na,na,na,na, color = upCss, style = line.style_dashed, extend = extend.right)
+var dntl  = line.new(na,na,na,na, color = dnCss, style = line.style_dashed, extend = extend.right)
+
+if ph and showExt
+    uptl.set_xy1(n-offset, backpaint ? ph : upper - slope_ph * length)
+    uptl.set_xy2(n-offset+1, backpaint ? ph - slope : upper - slope_ph * (length+1))
+
+if pl and showExt
+    dntl.set_xy1(n-offset, backpaint ? pl : lower + slope_pl * length)
+    dntl.set_xy2(n-offset+1, backpaint ? pl + slope : lower + slope_pl * (length+1))
+
+//-----------------------------------------------------------------------------}
+//Plots
+//-----------------------------------------------------------------------------{
+plot(backpaint ? upper : upper - slope_ph * length, 'Upper', color = ph ? na : upCss, offset = -offset)
+plot(backpaint ? lower : lower + slope_pl * length, 'Lower', color = pl ? na : dnCss, offset = -offset)
+
+//-----------------------------------------------------------------------------}
+//Confirmation Arrows and Background Color
+//-----------------------------------------------------------------------------{
+var confirmedUpBreak = 0
+var confirmedDnBreak = 0
+
+var lastSignal = 0 // 0 = None, 1 = Up Break, -1 = Down Break
+
+if (upos > upos[1] and lastSignal != 1)
+    confirmedUpBreak := bar_index
+    lastSignal := 1
+else if (dnos > dnos[1] and lastSignal != -1)
+    confirmedDnBreak := bar_index
+    lastSignal := -1
+
+plotshape(confirmedUpBreak == bar_index ? low : na, title = "Confirmed Up Break", location = location.belowbar, color = color.green, style = shape.triangleup, size = size.small)
+plotshape(confirmedDnBreak == bar_index ? high : na, title = "Confirmed Down Break", location = location.abovebar, color = color.red, style = shape.triangledown, size = size.small)
+
+// Background color
+bgcolor(lastSignal == 1 ? color.new(color.green, 90) : (lastSignal == -1 ? color.new(color.red, 90) : na), title = "Background Color")
+
+//-----------------------------------------------------------------------------}
+//Deep Buy and Deep Sell Conditions
+//-----------------------------------------------------------------------------{
+// Variables to store the previous confirmed break close prices
+var float prevConfirmedUpBreakClose = na
+var float prevConfirmedDnBreakClose = na
+
+// Flags to plot Deep Buy and Deep Sell labels
+var bool plotDeepBuyLabel = false
+var bool plotDeepSellLabel = false
+
+// Deep Sell Condition
+if (confirmedDnBreak != 0) 
+    if (not na(prevConfirmedDnBreakClose) and close < prevConfirmedDnBreakClose)
+        plotDeepSellLabel := true
+    prevConfirmedDnBreakClose := close
+
+// Deep Buy Condition
+if (confirmedUpBreak != 0) 
+    if (not na(prevConfirmedUpBreakClose) and close > prevConfirmedUpBreakClose)
+        plotDeepBuyLabel := true
+    prevConfirmedUpBreakClose := close
+
+// Plot Deep Buy and Deep Sell labels
+label.new(plotDeepSellLabel ? bar_index : na, high, "Deep Sell", color=color.red, style=label.style_label_down, size=size.normal, textcolor=color.white)
+label.new(plotDeepBuyLabel ? bar_index : na, low, "Deep Buy", color=color.green, style=label.style_label_up, size=size.normal, textcolor=color.white)
+
+// Reset the flags
+plotDeepSellLabel := false
+plotDeepBuyLabel := false
+
+//-----------------------------------------------------------------------------}
